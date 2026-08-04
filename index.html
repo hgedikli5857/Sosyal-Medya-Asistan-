@@ -435,7 +435,7 @@ textarea{resize:vertical;min-height:76px;}
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
               <button onclick="aiVideoGenerate()" style="font-size:12px;background:#7C3AED;color:white;border:none;border-radius:10px;padding:10px;cursor:pointer;">Video Olustur</button>
               <button class="btn-gold" onclick="downloadVideo()" id="vidDownloadBtn" style="font-size:12px;display:none;">Video Indir</button>
-            </div>
+              </div>
           </div>
           <div class="action-row">
             <button class="btn-sec" onclick="copyCaption()" id="copyBtn">Kopyala</button>
@@ -3111,6 +3111,6 @@ async function buildKlingJWT(accessKey,secretKey){
 function downloadVideo(){var url=window._lastVideoUrl;if(!url){alert('Once video olustur!');return;}var a=document.createElement('a');a.href=url;a.download='ai-video-'+Date.now()+'.mp4';a.target='_blank';document.body.appendChild(a);a.click();document.body.removeChild(a);}
 
 window.addEventListener('load',function(){try{loadAiKeys();loadVideoKeys();}catch(e){}});
-</script>
+<script src="composio-publish.js"></script>
 </body>
 </html>

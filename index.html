@@ -3111,6 +3111,5 @@ async function buildKlingJWT(accessKey,secretKey){
 function downloadVideo(){var url=window._lastVideoUrl;if(!url){alert('Once video olustur!');return;}var a=document.createElement('a');a.href=url;a.download='ai-video-'+Date.now()+'.mp4';a.target='_blank';document.body.appendChild(a);a.click();document.body.removeChild(a);}
 
 window.addEventListener('load',function(){try{loadAiKeys();loadVideoKeys();}catch(e){}});
-<script src="composio-publish.js"></script>
 </body>
 </html>

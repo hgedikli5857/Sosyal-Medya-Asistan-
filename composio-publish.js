@@ -1,433 +1,199 @@
-/**
- * Composio Publish Module
- * Sosyal Medya Asistanı → Instagram / Facebook / LinkedIn otomatik yayın
- * 
- * Kullanım: index.html'e <script src="composio-publish.js"></script> ekle
- */
+(function() {
+  var STORAGE_KEY = 'composio_api_key';
 
-const ComposioPublish = (() => {
+  function getKey() { return localStorage.getItem(STORAGE_KEY) || ''; }
+  function saveKey(k) { localStorage.setItem(STORAGE_KEY, k); }
 
-  // ── Ayarlar ──────────────────────────────────────────────────────────────
-  const STORAGE_KEY = 'composio_api_key';
-
-  function getApiKey() {
-    return localStorage.getItem(STORAGE_KEY) || '';
+  function toast(msg, ok) {
+    var d = document.createElement('div');
+    d.textContent = msg;
+    d.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99999;padding:12px 18px;border-radius:10px;font-size:14px;font-weight:600;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,0.2);max-width:320px;';
+    d.style.background = ok ? '#22c55e' : '#ef4444';
+    document.body.appendChild(d);
+    setTimeout(function(){ d.remove(); }, 4000);
   }
 
-  function saveApiKey(key) {
-    localStorage.setItem(STORAGE_KEY, key);
-  }
-
-  // ── Composio API çağrıları ───────────────────────────────────────────────
-
-  /**
-   * Instagram'a görsel post yayınla (2 adım: container → publish)
-   * @param {string} imageUrl - Kamuya açık JPEG/PNG URL
-   * @param {string} caption  - Caption + hashtagler
-   * @param {string} apiKey   - Composio API Key
-   */
-  async function publishToInstagram(imageUrl, caption, apiKey) {
-    // Adım 1: Media container oluştur
-    const containerRes = await fetch('https://backend.composio.dev/api/v2/actions/INSTAGRAM_POST_IG_USER_MEDIA/execute', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        input: {
-          ig_user_id: 'me',
-          image_url: imageUrl,
-          caption: caption,
-        }
-      }),
-    });
-
-    const containerData = await containerRes.json();
-    if (!containerData?.response?.data?.id) {
-      throw new Error('Instagram container oluşturulamadı: ' + JSON.stringify(containerData));
-    }
-
-    const creationId = containerData.response.data.id;
-
-    // Adım 2: Yayınla
-    const publishRes = await fetch('https://backend.composio.dev/api/v2/actions/INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH/execute', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        input: {
-          ig_user_id: 'me',
-          creation_id: creationId,
-          max_wait_seconds: 60,
-        }
-      }),
-    });
-
-    const publishData = await publishRes.json();
-    if (!publishData?.response?.data?.id) {
-      throw new Error('Instagram yayın başarısız: ' + JSON.stringify(publishData));
-    }
-
-    return publishData.response.data.id;
-  }
-
-  /**
-   * Facebook Sayfasına post yayınla
-   */
-  async function publishToFacebook(imageUrl, caption, apiKey) {
-    const res = await fetch('https://backend.composio.dev/api/v2/actions/FACEBOOK_CREATE_POST/execute', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        input: {
-          message: caption,
-          url: imageUrl,
-        }
-      }),
-    });
-
-    const data = await res.json();
-    if (!data?.response?.data?.id) {
-      throw new Error('Facebook yayın başarısız: ' + JSON.stringify(data));
-    }
-    return data.response.data.id;
-  }
-
-  /**
-   * LinkedIn'e post yayınla
-   */
-  async function publishToLinkedIn(imageUrl, caption, apiKey) {
-    const res = await fetch('https://backend.composio.dev/api/v2/actions/LINKEDIN_CREATE_LINKED_IN_POST/execute', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        input: {
-          text: caption,
-          ...(imageUrl ? { media_url: imageUrl } : {}),
-        }
-      }),
-    });
-
-    const data = await res.json();
-    if (!data?.response?.data?.id) {
-      throw new Error('LinkedIn yayın başarısız: ' + JSON.stringify(data));
-    }
-    return data.response.data.id;
-  }
-
-  // ── Ana yayın fonksiyonu ─────────────────────────────────────────────────
-
-  /**
-   * Platform'a göre yayın yapar
-   * @param {Object} opts
-   * @param {'instagram'|'facebook'|'linkedin'} opts.platform
-   * @param {string} opts.imageUrl  - Kamuya açık görsel/video URL
-   * @param {string} opts.caption   - Caption metni (hashtagler dahil)
-   * @param {string} [opts.apiKey]  - Composio API Key (yoksa localStorage'dan alır)
-   */
-  async function publish({ platform, imageUrl, caption, apiKey }) {
-    const key = apiKey || getApiKey();
-    if (!key) throw new Error('Composio API Key girilmemiş.');
-
-    switch (platform.toLowerCase()) {
-      case 'instagram': return await publishToInstagram(imageUrl, caption, key);
-      case 'facebook':  return await publishToFacebook(imageUrl, caption, key);
-      case 'linkedin':  return await publishToLinkedIn(imageUrl, caption, key);
-      default: throw new Error('Desteklenmeyen platform: ' + platform);
-    }
-  }
-
-  // ── Canvas'tan görsel URL'i al ──────────────────────────────────────────
-
-  /**
-   * HTML Canvas elementinden Blob URL üretir
-   * (şablon editöründeki canvas'ı yayına hazır URL'e çevirir)
-   * NOT: Instagram doğrudan blob URL kabul etmez → imgbb/cloudinary'e yükle
-   */
-  async function canvasToBlob(canvas) {
-    return new Promise((resolve, reject) => {
-      canvas.toBlob(blob => {
-        if (!blob) reject(new Error('Canvas Blob üretilemedi'));
-        else resolve(blob);
-      }, 'image/jpeg', 0.92);
-    });
-  }
-
-  /**
-   * Blob'u imgbb'ye yükler (ücretsiz, API key gerekmez temel kullanım için)
-   * Daha iyi alternatif: Cloudinary veya kendi sunucun
-   */
-  async function uploadBlobToImgbb(blob, imgbbKey) {
-    if (!imgbbKey) throw new Error('imgbb API Key gerekli (ücretsiz: imgbb.com/api)');
-    const formData = new FormData();
-    formData.append('image', blob);
-    const res = await fetch(`https://api.imgbb.com/1/upload?key=${imgbbKey}`, {
-      method: 'POST',
-      body: formData,
-    });
-    const data = await res.json();
-    if (!data?.data?.url) throw new Error('imgbb yükleme hatası: ' + JSON.stringify(data));
-    return data.data.url;
-  }
-
-  /**
-   * Şablon editöründeki canvas'ı alıp yayınlar
-   * @param {HTMLCanvasElement} canvas - Şablon editörü canvas elementi
-   * @param {string} caption
-   * @param {'instagram'|'facebook'|'linkedin'} platform
-   * @param {string} imgbbKey - imgbb API Key (ücretsiz)
-   * @param {string} [composioKey]
-   */
-  async function publishFromCanvas(canvas, caption, platform, imgbbKey, composioKey) {
-    const blob = await canvasToBlob(canvas);
-    const imageUrl = await uploadBlobToImgbb(blob, imgbbKey);
-    return await publish({ platform, imageUrl, caption, apiKey: composioKey });
-  }
-
-  // ── UI Yardımcıları ──────────────────────────────────────────────────────
-
-  /**
-   * Asistana Composio yayın butonları ekler
-   * Mevcut "Kopyala" ve "Takvime Ekle" butonlarının yanına
-   */
-  function injectPublishButtons() {
-    // Sonuç panelindeki buton grubunu bul
-    const buttonContainer = document.querySelector('.action-buttons, .result-actions, [data-actions]');
-
-    const platforms = [
-      { id: 'instagram', label: '📸 Instagram\'a Yayınla', color: '#E1306C' },
-      { id: 'facebook',  label: '👥 Facebook\'a Yayınla',  color: '#1877F2' },
-      { id: 'linkedin',  label: '💼 LinkedIn\'e Yayınla',  color: '#0A66C2' },
+  function getCaption() {
+    var selectors = [
+      '#caption-output', '.caption-output', '[data-caption]',
+      '.caption-text', '#captionOutput', '.result-caption'
     ];
-
-    platforms.forEach(p => {
-      const btn = document.createElement('button');
-      btn.id = `publish-${p.id}`;
-      btn.textContent = p.label;
-      btn.className = 'publish-btn';
-      btn.style.cssText = `
-        background: ${p.color};
-        color: white;
-        border: none;
-        padding: 10px 18px;
-        border-radius: 8px;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 600;
-        margin: 4px;
-        transition: opacity 0.2s;
-      `;
-      btn.addEventListener('mouseenter', () => btn.style.opacity = '0.85');
-      btn.addEventListener('mouseleave', () => btn.style.opacity = '1');
-      btn.addEventListener('click', () => handlePublishClick(p.id));
-
-      if (buttonContainer) {
-        buttonContainer.appendChild(btn);
-      } else {
-        // Buton konteyneri bulunamazsa body sonuna ekle (fallback)
-        document.body.appendChild(btn);
+    for (var i = 0; i < selectors.length; i++) {
+      var el = document.querySelector(selectors[i]);
+      if (el && (el.value || el.textContent).trim()) {
+        return (el.value || el.textContent).trim();
       }
-    });
+    }
+    // Tüm textarea ve contenteditable'ları tara
+    var areas = document.querySelectorAll('textarea, [contenteditable]');
+    for (var j = 0; j < areas.length; j++) {
+      var txt = (areas[j].value || areas[j].textContent).trim();
+      if (txt.length > 30) return txt;
+    }
+    return '';
   }
 
-  /**
-   * Yayın butonuna tıklandığında çalışır
-   */
-  async function handlePublishClick(platform) {
-    const apiKey = getApiKey();
+  function getImageUrl() {
+    // AI görsel çıktısındaki img
+    var imgs = document.querySelectorAll('img');
+    for (var i = 0; i < imgs.length; i++) {
+      var src = imgs[i].src;
+      if (src && src.startsWith('http') && !src.includes('logo') && !src.includes('icon') && imgs[i].width > 100) {
+        return src;
+      }
+    }
+    // Canvas
+    var canvas = document.querySelector('canvas');
+    if (canvas && canvas.width > 100) {
+      return canvas.toDataURL('image/jpeg', 0.9);
+    }
+    return '';
+  }
+
+  async function uploadToImgbb(dataUrl) {
+    var base64 = dataUrl.split(',')[1];
+    var formData = new FormData();
+    formData.append('image', base64);
+    var res = await fetch('https://api.imgbb.com/1/upload?key=6d207e02198a847aa98d0a2a901485a5', {
+      method: 'POST', body: formData
+    });
+    var data = await res.json();
+    if (data && data.data && data.data.url) return data.data.url;
+    throw new Error('Görsel yükleme başarısız');
+  }
+
+  async function publishIG(imageUrl, caption, apiKey) {
+    var res1 = await fetch('https://backend.composio.dev/api/v2/actions/INSTAGRAM_POST_IG_USER_MEDIA/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ input: { ig_user_id: 'me', image_url: imageUrl, caption: caption } })
+    });
+    var d1 = await res1.json();
+    var cid = d1?.response?.data?.id || d1?.data?.id;
+    if (!cid) throw new Error('Container oluşturulamadı: ' + JSON.stringify(d1));
+
+    var res2 = await fetch('https://backend.composio.dev/api/v2/actions/INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ input: { ig_user_id: 'me', creation_id: cid, max_wait_seconds: 60 } })
+    });
+    var d2 = await res2.json();
+    if (!d2?.response?.data?.id && !d2?.data?.id) throw new Error('Yayın başarısız: ' + JSON.stringify(d2));
+    return true;
+  }
+
+  async function publishFB(imageUrl, caption, apiKey) {
+    var res = await fetch('https://backend.composio.dev/api/v2/actions/FACEBOOK_CREATE_POST/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ input: { message: caption, url: imageUrl } })
+    });
+    var d = await res.json();
+    if (!d?.response?.data?.id && !d?.data?.id) throw new Error('Facebook yayın başarısız');
+    return true;
+  }
+
+  async function publishLI(imageUrl, caption, apiKey) {
+    var res = await fetch('https://backend.composio.dev/api/v2/actions/LINKEDIN_CREATE_LINKED_IN_POST/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ input: { text: caption, media_url: imageUrl } })
+    });
+    var d = await res.json();
+    if (!d?.response?.data?.id && !d?.data?.id) throw new Error('LinkedIn yayın başarısız');
+    return true;
+  }
+
+  async function handlePublish(platform, btn) {
+    var apiKey = getKey();
     if (!apiKey) {
-      showToast('⚠️ Önce Composio API Key\'ini Ayarlar\'dan gir.', 'error');
-      openSettingsModal();
+      toast('Önce Composio API Key gir! (Sayfanın üstündeki turuncu kutu)', false);
       return;
     }
 
-    // Asistanın mevcut state'inden caption ve görseli al
-    const caption = getCurrentCaption();
-    const imageUrl = getCurrentImageUrl();
+    var caption = getCaption();
+    if (!caption) { toast('Önce içerik oluştur!', false); return; }
 
-    if (!caption) {
-      showToast('⚠️ Önce içerik oluştur.', 'error');
-      return;
-    }
+    var imageUrl = getImageUrl();
+    if (!imageUrl) { toast('Görsel bulunamadı. Şablona görsel ekle veya AI Görsel üret.', false); return; }
 
-    if (!imageUrl) {
-      showToast('⚠️ Görsel gerekli. Şablon editöründen veya AI Görsel\'den bir görsel seç.', 'error');
-      return;
-    }
-
-    const btn = document.getElementById(`publish-${platform}`);
-    const originalText = btn.textContent;
+    var origText = btn.textContent;
     btn.textContent = '⏳ Yayınlanıyor...';
     btn.disabled = true;
 
     try {
-      const postId = await publish({ platform, imageUrl, caption, apiKey });
-      showToast(`✅ ${platform} yayını başarılı! Post ID: ${postId}`, 'success');
-      
-      // Takvime otomatik işaretle
-      markPublishedInCalendar(platform);
-    } catch (err) {
-      console.error('Yayın hatası:', err);
-      showToast(`❌ Hata: ${err.message}`, 'error');
+      // Canvas data URL ise imgbb'ye yükle
+      if (imageUrl.startsWith('data:')) {
+        toast('Görsel yükleniyor...', true);
+        imageUrl = await uploadToImgbb(imageUrl);
+      }
+
+      if (platform === 'instagram') await publishIG(imageUrl, caption, apiKey);
+      else if (platform === 'facebook') await publishFB(imageUrl, caption, apiKey);
+      else if (platform === 'linkedin') await publishLI(imageUrl, caption, apiKey);
+
+      toast('✅ ' + platform + ' yayını başarılı!', true);
+    } catch(err) {
+      toast('❌ Hata: ' + err.message, false);
+      console.error('[Composio]', err);
     } finally {
-      btn.textContent = originalText;
+      btn.textContent = origText;
       btn.disabled = false;
     }
   }
 
-  // ── State okuyucular (asistanın mevcut değişkenleriyle entegre) ──────────
+  function addPublishButtons() {
+    if (document.getElementById('composio-ig-btn')) return; // zaten eklendi
 
-  function getCurrentCaption() {
-    // Asistanın caption alanını oku — mevcut HTML yapısına göre uyarla
-    const el = document.querySelector(
-      '#caption-output, .caption-text, [data-caption], textarea[name="caption"]'
-    );
-    return el ? (el.value || el.textContent).trim() : '';
-  }
+    // Composio Key alanı — sayfanın en üstüne ekle
+    var keyBar = document.createElement('div');
+    keyBar.id = 'composio-key-bar';
+    keyBar.style.cssText = 'background:#1B2A4A;color:#fff;padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;';
+    keyBar.innerHTML = '<span style="font-weight:600;color:#C9A84C;">🔗 Composio API Key:</span>' +
+      '<input id="composio-key-field" type="password" placeholder="composio_..." value="' + getKey() + '" ' +
+      'style="flex:1;min-width:200px;padding:6px 10px;border-radius:6px;border:none;font-size:13px;" />' +
+      '<button id="composio-key-save" style="background:#C9A84C;color:#1B2A4A;border:none;padding:6px 14px;border-radius:6px;font-weight:600;cursor:pointer;">Kaydet</button>' +
+      '<a href="https://app.composio.dev" target="_blank" style="color:#C9A84C;font-size:12px;">Key al →</a>';
+    document.body.insertBefore(keyBar, document.body.firstChild);
 
-  function getCurrentImageUrl() {
-    // Önce AI görsel çıktısından dene
-    const aiImg = document.querySelector('#ai-image-result img, .ai-image-output img, #gorsel-sonuc img');
-    if (aiImg?.src && aiImg.src.startsWith('http')) return aiImg.src;
-
-    // Şablon editöründeki canvas'tan dene (blob URL yerine data URL ver)
-    const canvas = document.querySelector('#sablon-canvas, .template-canvas, canvas[id*="canvas"]');
-    if (canvas) {
-      // Canvas'tan direkt data URL — imgbb upload gerekecek
-      return canvas.toDataURL('image/jpeg', 0.92);
-    }
-
-    // İndirilen görsel varsa
-    const downloadedImg = document.querySelector('.downloaded-image, #son-gorsel img');
-    if (downloadedImg?.src) return downloadedImg.src;
-
-    return '';
-  }
-
-  // ── Yardımcı UI fonksiyonları ────────────────────────────────────────────
-
-  function showToast(message, type = 'info') {
-    // Mevcut toast sistemi varsa onu kullan, yoksa oluştur
-    if (window.showNotification) {
-      window.showNotification(message, type);
-      return;
-    }
-
-    const toast = document.createElement('div');
-    toast.textContent = message;
-    toast.style.cssText = `
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      background: ${type === 'success' ? '#22c55e' : type === 'error' ? '#ef4444' : '#3b82f6'};
-      color: white;
-      padding: 14px 20px;
-      border-radius: 10px;
-      font-size: 14px;
-      font-weight: 600;
-      z-index: 9999;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.25);
-      max-width: 360px;
-      animation: slideIn 0.3s ease;
-    `;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 4000);
-  }
-
-  function openSettingsModal() {
-    // Mevcut ayarlar modalını aç
-    const settingsBtn = document.querySelector('[data-modal="settings"], #ayarlar-btn, .settings-btn');
-    if (settingsBtn) settingsBtn.click();
-  }
-
-  function markPublishedInCalendar(platform) {
-    // Takvim entegrasyonu — ileride genişletilebilir
-    console.log(`[Composio] ${platform} yayını takvime işlendi.`);
-  }
-
-  // ── Ayarlar paneline Composio key alanı ekle ─────────────────────────────
-
-  function injectSettingsField() {
-    // API Key ayarlar bölümünü bul
-    const apiSection = document.querySelector('.api-keys-section, #api-ayarlari, [data-section="api"]');
-    if (!apiSection) return;
-
-    const wrapper = document.createElement('div');
-    wrapper.style.marginTop = '12px';
-    wrapper.innerHTML = `
-      <label style="font-size:13px;font-weight:600;color:#1B2A4A;display:block;margin-bottom:4px;">
-        🔗 Composio API Key
-        <a href="https://app.composio.dev" target="_blank" style="font-weight:400;color:#C9A84C;font-size:11px;margin-left:6px;">
-          Key al →
-        </a>
-      </label>
-      <input 
-        type="password" 
-        id="composio-key-input"
-        placeholder="composio_..."
-        value="${getApiKey()}"
-        style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:13px;"
-      />
-      <p style="font-size:11px;color:#888;margin-top:4px;">
-        Yalnızca bu cihazda saklanır. Instagram, Facebook ve LinkedIn bağlantıların Composio'da aktif olmalı.
-      </p>
-    `;
-    apiSection.appendChild(wrapper);
-
-    document.getElementById('composio-key-input').addEventListener('change', e => {
-      saveApiKey(e.target.value.trim());
-      showToast('✅ Composio API Key kaydedildi', 'success');
+    document.getElementById('composio-key-save').addEventListener('click', function() {
+      var val = document.getElementById('composio-key-field').value.trim();
+      saveKey(val);
+      toast('✅ Composio Key kaydedildi', true);
     });
-  }
 
-  // ── Canva entegrasyonu ────────────────────────────────────────────────────
+    // Yayın butonları — sabit köşe
+    var panel = document.createElement('div');
+    panel.id = 'composio-publish-panel';
+    panel.style.cssText = 'position:fixed;bottom:20px;left:20px;z-index:9998;display:flex;flex-direction:column;gap:8px;';
 
-  /**
-   * Canva'dan export edilen PNG/JPG URL'i ile yayınla
-   * (Canva export butonundan sonra çağrılır)
-   */
-  async function publishCanvaExport(canvaExportUrl, caption, platform) {
-    return await publish({
-      platform,
-      imageUrl: canvaExportUrl,
-      caption,
+    var btns = [
+      { id: 'composio-ig-btn', platform: 'instagram', label: '📸 Instagram\'a Yayınla', bg: '#E1306C' },
+      { id: 'composio-fb-btn', platform: 'facebook',  label: '👥 Facebook\'a Yayınla',  bg: '#1877F2' },
+      { id: 'composio-li-btn', platform: 'linkedin',  label: '💼 LinkedIn\'e Yayınla',  bg: '#0A66C2' },
+    ];
+
+    btns.forEach(function(b) {
+      var btn = document.createElement('button');
+      btn.id = b.id;
+      btn.textContent = b.label;
+      btn.style.cssText = 'background:' + b.bg + ';color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.25);text-align:left;';
+      btn.addEventListener('click', function() { handlePublish(b.platform, btn); });
+      panel.appendChild(btn);
     });
+
+    document.body.appendChild(panel);
   }
 
-  // ── Init ─────────────────────────────────────────────────────────────────
-
-  function init() {
-    // DOM hazır olduğunda butonları ve ayar alanını ekle
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => {
-        injectPublishButtons();
-        injectSettingsField();
-      });
-    } else {
-      injectPublishButtons();
-      injectSettingsField();
-    }
+  // DOM hazır olunca ekle
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', addPublishButtons);
+  } else {
+    addPublishButtons();
   }
 
-  // Public API
-  return {
-    init,
-    publish,
-    publishFromCanvas,
-    publishCanvaExport,
-    saveApiKey,
-    getApiKey,
-    showToast,
-  };
+  window.ComposioPublish = { publish: handlePublish, saveKey: saveKey, getKey: getKey };
+})();
 
 })();
 
